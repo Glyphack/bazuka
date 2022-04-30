@@ -160,7 +160,7 @@ impl<K: KvStore> KvStoreChain<K> {
 
                 if *dst != tx.src {
                     let mut acc_dst = self.get_account(dst.clone())?;
-                    acc_dst.balance += amount;
+                    acc_dst.balance += *amount;
 
                     ops.push(WriteOp::Put(
                         format!("account_{}", dst).into(),
@@ -498,5 +498,52 @@ impl<K: KvStore> Blockchain for KvStoreChain<K> {
                 * config::POW_KEY_CHANGE_INTERVAL;
             self.get_block(reference)?.header.hash().to_vec()
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::SystemTime;
+    use super::*;
+    use crate::{crypto, db};
+    use crate::core;
+    use crate::crypto::SignatureScheme;
+
+    #[test]
+    fn test_empty_bc_should_have_genesis_block() -> Result<(), BlockchainError> {
+        let mut kv_mock = db::RamKvStore::new();
+        let mut bc = KvStoreChain::new(kv_mock)?;
+        assert_eq!(1, bc.get_height()?);
+
+        let mut bedrock = bc.get_block(0)?;
+        assert_eq!(0, bedrock.header.number);
+        assert_eq!(1, bedrock.body.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_draft_block() -> Result<(), BlockchainError> {
+        let mut kv_mock = db::RamKvStore::new();
+        let mut bc = KvStoreChain::new(kv_mock)?;
+
+
+        let (pk_src, sk_src) = crypto::EdDSA::generate_keys(b"ABC");
+        let (pk_dest, sk_dest) = crypto::EdDSA::generate_keys(b"CBA");
+        let dst = "0x215d9af3a1bfa2a87929b6e8265e95c61c36f91493f3dbd702215255f68742552"
+            .parse()
+            .unwrap();
+        let mempool = vec![core::Transaction {
+            src: Address::Treasury,
+            data: core::TransactionData::RegularSend { dst, amount: 10 },
+            nonce: 1,
+            fee: 0,
+            sig: core::Signature::Unsigned,
+        }];
+        let mut wallet = Wallet::new(Vec::from("hi!"));
+        let time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as u32;
+        let draft = bc.draft_block(time, &mempool, &wallet)?;
+
+        Ok(())
     }
 }
